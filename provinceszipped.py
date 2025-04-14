@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[6]:
+# In[3]:
 
 
 import dash
@@ -190,5 +190,11 @@ def update_map(selected_provinces, clicked_markers):
     return fig
 
 if __name__ == '__main__':
-    app.run_server(debug=True, port=8055)
+    app.run_server(debug=True, port=10000)
+
+
+# In[ ]:
+
+
+
 
