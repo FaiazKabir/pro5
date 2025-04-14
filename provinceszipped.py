@@ -192,15 +192,3 @@ def update_map(selected_provinces, clicked_markers):
 if __name__ == '__main__':
     app.run_server(debug=True, port=8055)
 
-
-# In[1]:
-
-
-jupyter nbconvert --to python provinceszipped.ipynb
-
-
-# In[ ]:
-
-
-pip install nbc
-
