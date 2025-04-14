@@ -16,7 +16,7 @@ import os
 from shapely.geometry import shape
 
 # ---------------------------
-# Unzip GeoJSON files
+# Unzip GeoJSON files (Run once on startup)
 # ---------------------------
 def unzip_geojsons(zip_path, extract_to='.'):
     """Unzip GeoJSON files from a zip archive"""
@@ -32,106 +32,77 @@ def unzip_geojsons(zip_path, extract_to='.'):
         print(f"Error unzipping {zip_path}: {e}")
         return False
 
-# Specify the zip file path and extract
-geojson_zip = 'data.zip'  # Update this to your zip file path
+geojson_zip = 'data.zip'
 unzipped = unzip_geojsons(geojson_zip)
 
-# Initialize global data variables to None
-gdf = None
-geojson_data = None
-points_gdf = None
-notable_df = None
-province_to_places = {
-    "Alberta": ["Banff NP", "Jasper NP", "Calgary Tower", "Lake Louise", "West Edmonton Mall"],
-    "British Columbia": ["Stanley Park", "Butchart Gardens", "Whistler", "Capilano Bridge", "Pacific Rim NP"],
-    "Manitoba": ["The Forks", "Riding Mountain NP", "Assiniboine Zoo", "Museum for Human Rights", "FortWhyte Alive"],
-    "New Brunswick": ["Bay of Fundy", "Hopewell Rocks", "Fundy NP", "Reversing Falls", "Kings Landing"],
-    "Newfoundland and Labrador": ["Gros Morne NP", "Signal Hill", "L'Anse aux Meadows", "Cape Spear", "Bonavista"],
-    "Nova Scotia": ["Peggy's Cove", "Cabot Trail", "Halifax Citadel", "Lunenburg", "Kejimkujik NP"],
-    "Ontario": ["CN Tower", "Niagara Falls", "Algonquin Park", "Parliament Hill", "Royal Ontario Museum"],
-    "Prince Edward Island": ["Green Gables", "Cavindish Beach", "Confederation Trail", "PEI NP", "Point Prim Lighthouse"],
-    "Quebec": ["Old Quebec", "Mont-Tremblant", "Montmorency Falls", "Quebec City", "Sainte-Anne-de-Beaupré"],
-    "Saskatchewan": ["Forestry Zoo", "Wanuskewin", "Prince Albert NP", "Wascana Centre", "RCMP Heritage Centre"],
-    "Northwest Territories": ["Nahanni NP", "Great Slave Lake", "Virginia Falls", "Yellowknife", "Wood Buffalo NP"],
-    "Nunavut": ["Auyuittuq NP", "Sylvia Grinnell Park", "Qaummaarviit Park", "Iqaluit", "Sirmilik NP"],
-    "Yukon": ["Kluane NP", "Miles Canyon", "SS Klondike", "Whitehorse", "Tombstone Park"]
-}
-
-if unzipped:
-    # ---------------------------
-    # Load and Prepare Data (Simplified GeoJSON)
-    # ---------------------------
-    province_geojson_path = 'geoBoundaries-CAN-ADM1_simplified.geojson'
-    try:
-        with open(province_geojson_path) as f:
-            geojson_data = json.load(f)
-
-        gdf = gpd.GeoDataFrame.from_features(geojson_data['features'])
-        gdf = gdf.rename(columns={"shapeName": "Province"})
-        gdf.set_crs(epsg=4326, inplace=True)
-
-        # Simplify geometries (adjust tolerance as needed)
-        gdf['geometry'] = gdf['geometry'].simplify(tolerance=0.01)
-
-        # For hover info, add a comma-separated string of notable places to gdf
-        gdf["Notable Places"] = gdf["Province"].map(lambda prov: ", ".join(province_to_places[prov]))
-
-        # Load points-of-interest geoJSON as a GeoDataFrame
-        poi_geojson_path = "hotosm_can_points_of_interest_points_geojson.geojson"
-        points_gdf = gpd.read_file(poi_geojson_path)
-        points_gdf.set_crs(epsg=4326, inplace=True)
-        points_gdf = points_gdf.to_crs(gdf.crs)
-
-        # Precompute a DataFrame of only those POIs that match the notable places AND lie within the province boundary.
-        filtered_rows = []
-        for prov, places in province_to_places.items():
-            province_poly = gdf[gdf["Province"] == prov].geometry.unary_union
-            for place in places:
-                matches = points_gdf[points_gdf["name"].str.contains(place, case=False, na=False)]
-                for _, row in matches.iterrows():
-                    if row.geometry.within(province_poly):
-                        filtered_rows.append({
-                            "Province": prov,
-                            "Place": place,
-                            "lat": row.geometry.y,
-                            "lon": row.geometry.x
-                        })
-
-        notable_df = pd.DataFrame(filtered_rows)
-        notable_df["marker_id"] = notable_df.apply(lambda row: f"{row['Province']}_{row['Place']}_{row.name}", axis=1)
-
-        print("Data loaded and prepared successfully.")
-
-    except FileNotFoundError as e:
-        print(f"Error loading GeoJSON file: {e}")
-        gdf = pd.DataFrame() # Create empty dataframes to avoid errors later
-        geojson_data = {}
-        points_gdf = pd.DataFrame()
-        notable_df = pd.DataFrame()
-    except Exception as e:
-        print(f"An error occurred during data loading/preparation: {e}")
-        gdf = pd.DataFrame()
-        geojson_data = {}
-        points_gdf = pd.DataFrame()
-        notable_df = pd.DataFrame()
-
-# ---------------------------
 # Initialize Dash App
-# ---------------------------
 app = dash.Dash(__name__)
-server = app.server # This MUST be defined for Gunicorn
+server = app.server
 
 app.layout = html.Div([
     html.H1("Canada Provinces with Notable Places"),
     dcc.Dropdown(
         id='province-dropdown',
-        options=[{'label': prov, 'value': prov} for prov in sorted(gdf['Province'].unique()) if 'Province' in gdf.columns],
+        options=[],  # Options will be populated dynamically
         multi=True,
         placeholder="Select Provinces to highlight"
     ),
+    dcc.Store(id='province-data'), # Store to hold province-specific data
+    dcc.Store(id='poi-data'),      # Store to hold POI data
     dcc.Store(id='clicked-markers', data=[]),
     dcc.Graph(id='choropleth-map')
 ])
+
+# ---------------------------
+# Callback to Load Initial Data and Populate Dropdown
+# ---------------------------
+@app.callback(
+    [Output('province-dropdown', 'options'),
+     Output('province-data', 'data'),
+     Output('poi-data', 'data')],
+    Input('province-dropdown', 'id') # Dummy input to trigger on app load
+)
+def load_initial_data(dummy_id):
+    if not unzipped:
+        return [], {}, {}
+
+    province_geojson_path = 'geoBoundaries-CAN-ADM1_simplified.geojson'
+    poi_geojson_path = "hotosm_can_points_of_interest_points_geojson.geojson"
+    province_to_places = {
+        "Alberta": ["Banff NP", "Jasper NP", "Calgary Tower", "Lake Louise", "West Edmonton Mall"],
+        "British Columbia": ["Stanley Park", "Butchart Gardens", "Whistler", "Capilano Bridge", "Pacific Rim NP"],
+        "Manitoba": ["The Forks", "Riding Mountain NP", "Assiniboine Zoo", "Museum for Human Rights", "FortWhyte Alive"],
+        "New Brunswick": ["Bay of Fundy", "Hopewell Rocks", "Fundy NP", "Reversing Falls", "Kings Landing"],
+        "Newfoundland and Labrador": ["Gros Morne NP", "Signal Hill", "L'Anse aux Meadows", "Cape Spear", "Bonavista"],
+        "Nova Scotia": ["Peggy's Cove", "Cabot Trail", "Halifax Citadel", "Lunenburg", "Kejimkujik NP"],
+        "Ontario": ["CN Tower", "Niagara Falls", "Algonquin Park", "Parliament Hill", "Royal Ontario Museum"],
+        "Prince Edward Island": ["Green Gables", "Cavindish Beach", "Confederation Trail", "PEI NP", "Point Prim Lighthouse"],
+        "Quebec": ["Old Quebec", "Mont-Tremblant", "Montmorency Falls", "Quebec City", "Sainte-Anne-de-Beaupré"],
+        "Saskatchewan": ["Forestry Zoo", "Wanuskewin", "Prince Albert NP", "Wascana Centre", "RCMP Heritage Centre"],
+        "Northwest Territories": ["Nahanni NP", "Great Slave Lake", "Virginia Falls", "Yellowknife", "Wood Buffalo NP"],
+        "Nunavut": ["Auyuittuq NP", "Sylvia Grinnell Park", "Qaummaarviit Park", "Iqaluit", "Sirmilik NP"],
+        "Yukon": ["Kluane NP", "Miles Canyon", "SS Klondike", "Whitehorse", "Tombstone Park"]
+    }
+
+    try:
+        with open(province_geojson_path) as f:
+            geojson_data = json.load(f)
+        gdf = gpd.GeoDataFrame.from_features(geojson_data['features'])
+        gdf = gdf.rename(columns={"shapeName": "Province"})
+        gdf.set_crs(epsg=4326, inplace=True)
+        gdf['geometry'] = gdf['geometry'].simplify(tolerance=0.01)
+        province_options = [{'label': prov, 'value': prov} for prov in sorted(gdf['Province'].unique())]
+        province_data = gdf.to_json()
+
+        points_gdf_full = gpd.read_file(poi_geojson_path)
+        points_gdf_full.set_crs(epsg=4326, inplace=True)
+        poi_data = points_gdf_full.to_json()
+
+        return province_options, province_data, poi_data
+
+    except Exception as e:
+        print(f"Error loading initial data: {e}")
+        return [], {}, {}
 
 # ---------------------------
 # Callback: Update Clicked Markers List
@@ -156,70 +127,87 @@ def update_clicked_markers(clickData, current_clicked):
 @app.callback(
     Output('choropleth-map', 'figure'),
     Input('province-dropdown', 'value'),
-    Input('clicked-markers', 'data')
+    State('province-data', 'data'),
+    State('poi-data', 'data'),
+    State('clicked-markers', 'data')
 )
-def update_map(selected_provinces, clicked_markers):
-    if gdf is None or geojson_data is None or notable_df is None:
+def update_map(selected_provinces, province_data_json, poi_data_json, clicked_markers):
+    if not province_data_json or not poi_data_json:
         return {
             'data': [],
             'layout': {
-                'title': 'Error loading data. Please check logs.',
+                'title': 'Data not loaded.',
                 'margin': {"r": 0, "t": 0, "l": 0, "b": 0}
             }
         }
 
-    if not selected_provinces:
-        fig = px.choropleth_mapbox(
-            gdf,
-            geojson=geojson_data,
-            locations='Province',
-            featureidkey="properties.shapeName",
-            color_discrete_sequence=["lightgray"],
-            hover_data=["Province", "Notable Places"],
-            mapbox_style="carto-positron",
-            zoom=2,
-            center={"lat": 56.130, "lon": -106.347},
-            opacity=0.5,
-        )
-        fig.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0})
-        return fig
-
-    filtered_gdf = gdf[gdf["Province"].isin(selected_provinces)]
-    filtered_geojson = {
-        "type": "FeatureCollection",
-        "features": [feat for feat in geojson_data['features']
-                     if feat['properties']['shapeName'] in selected_provinces]
+    gdf = gpd.read_file(json.dumps(province_data_json))
+    points_gdf = gpd.read_file(json.dumps(poi_data_json))
+    province_to_places = {
+        "Alberta": ["Banff NP", "Jasper NP", "Calgary Tower", "Lake Louise", "West Edmonton Mall"],
+        "British Columbia": ["Stanley Park", "Butchart Gardens", "Whistler", "Capilano Bridge", "Pacific Rim NP"],
+        "Manitoba": ["The Forks", "Riding Mountain NP", "Assiniboine Zoo", "Museum for Human Rights", "FortWhyte Alive"],
+        "New Brunswick": ["Bay of Fundy", "Hopewell Rocks", "Fundy NP", "Reversing Falls", "Kings Landing"],
+        "Newfoundland and Labrador": ["Gros Morne NP", "Signal Hill", "L'Anse aux Meadows", "Cape Spear", "Bonavista"],
+        "Nova Scotia": ["Peggy's Cove", "Cabot Trail", "Halifax Citadel", "Lunenburg", "Kejimkujik NP"],
+        "Ontario": ["CN Tower", "Niagara Falls", "Algonquin Park", "Parliament Hill", "Royal Ontario Museum"],
+        "Prince Edward Island": ["Green Gables", "Cavindish Beach", "Confederation Trail", "PEI NP", "Point Prim Lighthouse"],
+        "Quebec": ["Old Quebec", "Mont-Tremblant", "Montmorency Falls", "Quebec City", "Sainte-Anne-de-Beaupré"],
+        "Saskatchewan": ["Forestry Zoo", "Wanuskewin", "Prince Albert NP", "Wascana Centre", "RCMP Heritage Centre"],
+        "Northwest Territories": ["Nahanni NP", "Great Slave Lake", "Virginia Falls", "Yellowknife", "Wood Buffalo NP"],
+        "Nunavut": ["Auyuittuq NP", "Sylvia Grinnell Park", "Qaummaarviit Park", "Iqaluit", "Sirmilik NP"],
+        "Yukon": ["Kluane NP", "Miles Canyon", "SS Klondike", "Whitehorse", "Tombstone Park"]
     }
+    gdf["Notable Places"] = gdf["Province"].map(lambda prov: ", ".join(province_to_places[prov]))
+
     fig = px.choropleth_mapbox(
-        filtered_gdf,
-        geojson=filtered_geojson,
+        gdf[gdf["Province"].isin(selected_provinces)] if selected_provinces else gdf,
+        geojson={
+            "type": "FeatureCollection",
+            "features": [feat for feat in json.loads(province_data_json)['features']
+                         if not selected_provinces or feat['properties']['shapeName'] in selected_provinces]
+        },
         locations='Province',
         featureidkey="properties.shapeName",
-        color_discrete_sequence=["blue"],
+        color_discrete_sequence=["blue"] if selected_provinces else ["lightgray"],
         hover_data=["Province", "Notable Places"],
         mapbox_style="carto-positron",
         zoom=2,
         center={"lat": 56.130, "lon": -106.347},
-        opacity=0.7,
+        opacity=0.7 if selected_provinces else 0.5,
     )
-
-    marker_subset = notable_df[notable_df["Province"].isin(selected_provinces)]
-    marker_colors = ["green" if marker_id in clicked_markers else "red"
-                     for marker_id in marker_subset["marker_id"]]
-
-    if not marker_subset.empty:
-        fig.add_trace(go.Scattermapbox(
-            lat=marker_subset["lat"],
-            lon=marker_subset["lon"],
-            mode='markers',
-            marker=dict(size=10, color=marker_colors),
-            text=marker_subset["Place"],
-            customdata=marker_subset["marker_id"],
-            hoverinfo='text'
-        ))
-
     fig.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0})
+
+    if selected_provinces:
+        filtered_rows = []
+        for prov in selected_provinces:
+            province_poly = gdf[gdf["Province"] == prov].geometry.unary_union
+            for place in province_to_places[prov]:
+                matches = points_gdf[points_gdf["name"].str.contains(place, case=False, na=False)]
+                for _, row in matches.iterrows():
+                    if row.geometry.within(province_poly):
+                        filtered_rows.append({
+                            "Province": prov,
+                            "Place": place,
+                            "lat": row.geometry.y,
+                            "lon": row.geometry.x
+                        })
+        marker_subset = pd.DataFrame(filtered_rows)
+        if not marker_subset.empty:
+            marker_subset["marker_id"] = marker_subset.apply(lambda row: f"{row['Province']}_{row['Place']}_{row.name}", axis=1)
+            marker_colors = ["green" if marker_id in clicked_markers else "red"
+                             for marker_id in marker_subset["marker_id"]]
+            fig.add_trace(go.Scattermapbox(
+                lat=marker_subset["lat"],
+                lon=marker_subset["lon"],
+                mode='markers',
+                marker=dict(size=10, color=marker_colors),
+                text=marker_subset["Place"],
+                customdata=marker_subset["marker_id"],
+                hoverinfo='text'
+            ))
+
     return fig
 
 if __name__ == '__main__':
-    app.run_server(debug=False) # Ensure debug is False for production
+    app.run_server(debug=False)
