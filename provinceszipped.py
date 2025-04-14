@@ -88,8 +88,9 @@ notable_df["marker_id"] = notable_df.apply(lambda row: f"{row['Province']}_{row[
 # ---------------------------
 # Initialize Dash App
 # ---------------------------
+
+
 app = dash.Dash(__name__)
-server = app.server   # <-- this is what Render’s Gunicorn will look for
 
 app.layout = html.Div([
     html.H1("Canada Provinces with Notable Places"),
@@ -103,6 +104,9 @@ app.layout = html.Div([
     dcc.Store(id='clicked-markers', data=[]),
     dcc.Graph(id='choropleth-map')
 ])
+
+server = app.server #Important for gunicorn.
+
 
 # ---------------------------
 # Callback: Update Clicked Markers List
@@ -191,7 +195,10 @@ def update_map(selected_provinces, clicked_markers):
     return fig
 
 if __name__ == '__main__':
-    app.run_server(port=8051, debug=False)
+    app.run_server(debug=True)
+
+#if __name__ == '__main__':
+ #   app.run_server(port=8051, debug=False)
 
 # (Optional) local dev fallback:
 #if __name__ == '__main__':
