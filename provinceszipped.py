@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[3]:
+# In[4]:
 
 
 import dash
@@ -89,7 +89,7 @@ notable_df["marker_id"] = notable_df.apply(lambda row: f"{row['Province']}_{row[
 # Initialize Dash App
 # ---------------------------
 app = dash.Dash(__name__)
-#server = app.server   # <-- this is what Render’s Gunicorn will look for
+server = app.server   # <-- this is what Render’s Gunicorn will look for
 
 app.layout = html.Div([
     html.H1("Canada Provinces with Notable Places"),
@@ -190,10 +190,13 @@ def update_map(selected_provinces, clicked_markers):
     fig.update_layout(margin={"r":0, "t":0, "l":0, "b":0})
     return fig
 
-# (Optional) local dev fallback:
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 15123))
-    app.run_server(host='0.0.0.0', port=port, debug=False)
+    app.run_server(port=8051, debug=False)
+
+# (Optional) local dev fallback:
+#if __name__ == '__main__':
+ #   port = int(os.environ.get('PORT', 8000))
+  #  app.run_server(host='127.0.0.1', port=port, debug=False)
 
 
 # In[ ]:
