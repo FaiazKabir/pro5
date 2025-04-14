@@ -185,5 +185,5 @@ def update_map(selected_provinces, clicked_markers):
     return fig
 
 if __name__ == '__main__':
-    app.run_server(debug=True)
+    app.run_server(debug=False)
 
