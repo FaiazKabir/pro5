@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[4]:
+# In[ ]:
 
 
 import dash
@@ -13,6 +13,7 @@ import pandas as pd
 import json
 import zipfile
 import os
+from shapely.geometry import shape
 
 # ---------------------------
 # Unzip GeoJSON files
@@ -28,9 +29,8 @@ geojson_zip = 'data.zip'  # Update this to your zip file path
 unzip_geojsons(geojson_zip)
 
 # ---------------------------
-# Load and Prepare Data
+# Load and Prepare Data (Simplified GeoJSON)
 # ---------------------------
-# Load province polygons geoJSON
 province_geojson_path = 'geoBoundaries-CAN-ADM1_simplified.geojson'
 with open(province_geojson_path) as f:
     geojson_data = json.load(f)
@@ -38,6 +38,9 @@ with open(province_geojson_path) as f:
 gdf = gpd.GeoDataFrame.from_features(geojson_data['features'])
 gdf = gdf.rename(columns={"shapeName": "Province"})
 gdf.set_crs(epsg=4326, inplace=True)
+
+# Simplify geometries (adjust tolerance as needed)
+gdf['geometry'] = gdf['geometry'].simplify(tolerance=0.01) #adjust this tolerance.
 
 # Define notable places per province (as lists)
 province_to_places = {
@@ -68,7 +71,6 @@ points_gdf = points_gdf.to_crs(gdf.crs)
 # Precompute a DataFrame of only those POIs that match the notable places AND lie within the province boundary.
 filtered_rows = []
 for prov, places in province_to_places.items():
-    # Use union_all() instead of unary_union
     province_poly = gdf[gdf["Province"] == prov].geometry.unary_union
     for place in places:
         matches = points_gdf[points_gdf["name"].str.contains(place, case=False, na=False)]
@@ -82,14 +84,11 @@ for prov, places in province_to_places.items():
                 })
 
 notable_df = pd.DataFrame(filtered_rows)
-# Create a unique marker ID for each notable POI.
 notable_df["marker_id"] = notable_df.apply(lambda row: f"{row['Province']}_{row['Place']}_{row.name}", axis=1)
 
 # ---------------------------
 # Initialize Dash App
 # ---------------------------
-
-
 app = dash.Dash(__name__)
 
 app.layout = html.Div([
@@ -100,13 +99,11 @@ app.layout = html.Div([
         multi=True,
         placeholder="Select Provinces to highlight"
     ),
-    # Store to hold the list of clicked markers
     dcc.Store(id='clicked-markers', data=[]),
     dcc.Graph(id='choropleth-map')
 ])
 
-server = app.server #Important for gunicorn.
-
+server = app.server  # Important for gunicorn.
 
 # ---------------------------
 # Callback: Update Clicked Markers List
@@ -119,10 +116,8 @@ server = app.server #Important for gunicorn.
 def update_clicked_markers(clickData, current_clicked):
     if clickData and 'points' in clickData:
         point = clickData['points'][0]
-        # customdata contains our unique marker ID
         if 'customdata' in point:
             marker_id = point['customdata']
-            # Add to list if not already present
             if marker_id not in current_clicked:
                 return current_clicked + [marker_id]
     return current_clicked
@@ -136,7 +131,6 @@ def update_clicked_markers(clickData, current_clicked):
     Input('clicked-markers', 'data')
 )
 def update_map(selected_provinces, clicked_markers):
-    # If no province is selected, display all provinces in light gray.
     if not selected_provinces:
         fig = px.choropleth_mapbox(
             gdf,
@@ -150,10 +144,9 @@ def update_map(selected_provinces, clicked_markers):
             center={"lat": 56.130, "lon": -106.347},
             opacity=0.5,
         )
-        fig.update_layout(margin={"r":0, "t":0, "l":0, "b":0})
+        fig.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0})
         return fig
 
-    # Otherwise, filter to the selected provinces (displayed in blue).
     filtered_gdf = gdf[gdf["Province"].isin(selected_provinces)]
     filtered_geojson = {
         "type": "FeatureCollection",
@@ -173,13 +166,10 @@ def update_map(selected_provinces, clicked_markers):
         opacity=0.7,
     )
 
-    # Filter our precomputed notable_df to only include markers in the selected provinces.
     marker_subset = notable_df[notable_df["Province"].isin(selected_provinces)]
-    
-    # Set marker color to green if its unique ID is in clicked_markers, else red
-    marker_colors = ["green" if marker_id in clicked_markers else "red" 
+    marker_colors = ["green" if marker_id in clicked_markers else "red"
                      for marker_id in marker_subset["marker_id"]]
-    
+
     if not marker_subset.empty:
         fig.add_trace(go.Scattermapbox(
             lat=marker_subset["lat"],
@@ -190,24 +180,10 @@ def update_map(selected_provinces, clicked_markers):
             customdata=marker_subset["marker_id"],
             hoverinfo='text'
         ))
-    
-    fig.update_layout(margin={"r":0, "t":0, "l":0, "b":0})
+
+    fig.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0})
     return fig
 
 if __name__ == '__main__':
     app.run_server(debug=True)
-
-#if __name__ == '__main__':
- #   app.run_server(port=8051, debug=False)
-
-# (Optional) local dev fallback:
-#if __name__ == '__main__':
- #   port = int(os.environ.get('PORT', 8000))
-  #  app.run_server(host='127.0.0.1', port=port, debug=False)
-
-
-# In[ ]:
-
-
-
 
