@@ -13,20 +13,21 @@ import pandas as pd
 import json
 import zipfile
 
+# Initialize Dash App
+app = dash.Dash(__name__)
+server = app.server
+
 # ---------------------------
 # Hardcoded coordinates (unchanged)
 # ---------------------------
 hardcoded_poi_coordinates = {
     "Alberta": [
         {"place": "Banff NP", "lat": 51.4968, "lon": -115.9281, "marker_id": "Alberta_Banff NP"},
+        {"place": "Jasper NP", "lat": 52.8736, "lon": -117.9430, "marker_id": "Alberta_Jasper NP"},
         # ... (keep all your existing POI coordinates) ...
     ],
     # ... (keep all your other provinces) ...
 }
-
-# Initialize Dash App
-app = dash.Dash(__name__)
-server = app.server
 
 app.layout = html.Div([
     html.H1("Canada Provinces with Notable Places"),
@@ -61,7 +62,7 @@ def load_province_names(_):
         return [], []
 
 # ---------------------------
-# Optimized map update with POIs
+# Optimized map update with all POIs
 # ---------------------------
 @app.callback(
     Output('choropleth-map', 'figure'),
@@ -71,7 +72,7 @@ def load_province_names(_):
 )
 def update_map(selected_provinces, clicked_markers, all_provinces):
     try:
-        # Base empty figure
+        # Initialize figure
         fig = go.Figure()
         
         # Load GeoJSON data
@@ -106,24 +107,24 @@ def update_map(selected_provinces, clicked_markers, all_provinces):
                         showscale=False
                     ))
         
-        # Add POI markers for selected provinces
-        if selected_provinces:
-            for province in selected_provinces:
-                if province in hardcoded_poi_coordinates:
-                    for poi in hardcoded_poi_coordinates[province]:
-                        fig.add_trace(go.Scattermapbox(
-                            lat=[poi['lat']],
-                            lon=[poi['lon']],
-                            mode='markers',
-                            marker=dict(
-                                size=10,
-                                color='green' if poi['marker_id'] in clicked_markers else 'red'
-                            ),
-                            text=poi['place'],
-                            customdata=[poi['marker_id']],
-                            hoverinfo='text',
-                            showlegend=False
-                        ))
+        # Add ALL POI markers (not just for selected provinces)
+        for province, pois in hardcoded_poi_coordinates.items():
+            # Only show markers for selected provinces if any are selected
+            if not selected_provinces or province in selected_provinces:
+                for poi in pois:
+                    fig.add_trace(go.Scattermapbox(
+                        lat=[poi['lat']],
+                        lon=[poi['lon']],
+                        mode='markers',
+                        marker=dict(
+                            size=10,
+                            color='green' if poi['marker_id'] in clicked_markers else 'red'
+                        ),
+                        text=poi['place'],
+                        customdata=[poi['marker_id']],
+                        hoverinfo='text',
+                        showlegend=False
+                    ))
         
         # Update map layout
         fig.update_layout(
