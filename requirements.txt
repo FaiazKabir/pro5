@@ -1,4 +1,4 @@
-dash==2.11.1
+dash==2.14.2
 plotly==5.18.0
 geopandas==0.14.1
 pandas==2.1.4
