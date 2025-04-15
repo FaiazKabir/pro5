@@ -32,7 +32,7 @@ def unzip_geojsons(zip_path, extract_to='.'):
         print(f"Error unzipping {zip_path}: {e}")
         return False
 
-geojson_zip = 'data.zip'
+geojson_zip = 'data.zip'  #  Make sure this file is in the same directory.
 unzipped = unzip_geojsons(geojson_zip)
 
 # ---------------------------
@@ -134,7 +134,7 @@ hardcoded_poi_coordinates = {
 
 # Initialize Dash App
 app = dash.Dash(__name__)
-server = app.server
+server = app.server  # This is the important line for Render/Gunicorn
 
 app.layout = html.Div([
     html.H1("Canada Provinces with Notable Places"),
@@ -144,7 +144,7 @@ app.layout = html.Div([
         multi=True,
         placeholder="Select Provinces to highlight"
     ),
-    dcc.Store(id='province-list'), # Store a simple list of provinces
+    dcc.Store(id='province-list'),  # Store a simple list of provinces
     dcc.Store(id='clicked-markers', data=[]),
     dcc.Graph(id='choropleth-map')
 ])
@@ -188,4 +188,92 @@ def update_province_map(selected_provinces, all_provinces, clicked_markers):
     province_geojson_path = 'geoBoundaries-CAN-ADM1_simplified.geojson'
     try:
         with open(province_geojson_path) as f:
-            geojson_data = json.load
+            geojson_data = json.load(f)
+
+        if not selected_provinces:
+            if all_provinces:
+                fig = px.choropleth_mapbox(
+                    pd.DataFrame({'Province': all_provinces}),
+                    geojson=geojson_data,
+                    locations='Province',
+                    featureidkey="properties.shapeName",
+                    color_discrete_sequence=["lightgray"],
+                    hover_data=['Province'],
+                    mapbox_style="carto-positron",
+                    zoom=2,
+                    center={"lat": 56.130, "lon": -106.347},
+                    opacity=0.5,
+                )
+                fig.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0})
+                return fig
+            else:
+                return {'data': [], 'layout': {'title': 'No province data available', 'margin': {"r": 0, "t": 0, "l": 0, "b": 0}}}
+
+        filtered_features = [
+            feat for feat in geojson_data['features']
+            if feat['properties']['shapeName'] in selected_provinces
+        ]
+        filtered_gdf = gpd.GeoDataFrame.from_features(filtered_features)
+        if not filtered_gdf.empty:
+            filtered_gdf.rename(columns={"shapeName": "Province"}, inplace=True)
+            filtered_gdf.set_crs(epsg=4326, inplace=True)
+            filtered_gdf['geometry'] = filtered_gdf['geometry'].simplify(tolerance=0.01)
+
+            # Add markers for selected provinces
+            markers = []
+            for province in selected_provinces:
+                for poi in hardcoded_poi_coordinates.get(province, []):
+                    marker = go.Scattermapbox(
+                        lat=[poi['lat']],
+                        lon=[poi['lon']],
+                        mode='markers',
+                        marker=go.scattermapbox.Marker(
+                            size=10,
+                            color='red'
+                        ),
+                        text=poi['place'],
+                        hoverinfo='text',
+                        customdata=[poi['marker_id']],  # Store a unique ID for clicked detection
+                    )
+                    markers.append(marker)
+
+            fig = px.choropleth_mapbox(
+                filtered_gdf,
+                geojson={"type": "FeatureCollection", "features": filtered_features},
+                locations='Province',
+                featureidkey="properties.shapeName",
+                color_discrete_sequence=["blue"],
+                hover_data=["Province"],
+                mapbox_style="carto-positron",
+                zoom=2,
+                center={"lat": 56.130, "lon": -106.347},
+                opacity=0.7,
+            )
+            fig.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0})
+            # Add the marker traces to the figure
+            fig.add_traces(markers)
+            return fig
+        else:
+            return {'data': [], 'layout': {'title': 'No provinces selected', 'margin': {"r": 0, "t": 0, "l": 0, "b": 0}}}
+    except Exception as e:
+        print(f"Error updating province map: {e}")
+        return {'data': [], 'layout': {'title': 'Error displaying map', 'margin': {"r": 0, "t": 0, "l": 0, "b": 0}}}
+
+
+
+# ---------------------------
+# Callback: Update Clicked Markers List
+# ---------------------------
+@app.callback(
+    Output('clicked-markers', 'data'),
+    Input('choropleth-map', 'clickData'),
+    State('clicked-markers', 'data')
+)
+def update_clicked_markers(clickData, current_clicked):
+    if clickData and 'points' in clickData:
+        point = clickData['points'][0]
+        if 'customdata' in point:
+            marker_id = point['customdata'][0]  # Get the marker_id from customdata
+            if marker_id not in current_clicked:
+                return current_clicked + [marker_id]
+    return current_clicked
