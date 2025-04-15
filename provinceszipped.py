@@ -252,7 +252,7 @@ def update_province_map(selected_provinces, all_provinces, clicked_markers):
             )
             fig.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0})
             # Add the marker traces to the figure
-            fig.add_traces(markers)
+            fig.data = fig.data + tuple(markers) # Corrected line: Add markers to existing data
             return fig
         else:
             return {'data': [], 'layout': {'title': 'No provinces selected', 'margin': {"r": 0, "t": 0, "l": 0, "b": 0}}}
