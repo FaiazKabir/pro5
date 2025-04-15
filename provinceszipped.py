@@ -94,20 +94,23 @@ def update_province_map(selected_provinces, all_provinces):
             geojson_data = json.load(f)
 
         if not selected_provinces:
-            fig = px.choropleth_mapbox(
-                pd.DataFrame({'Province': all_provinces}), # Dummy DataFrame
-                geojson=geojson_data,
-                locations='Province',
-                featureidkey="properties.shapeName",
-                color_discrete_sequence=["lightgray"],
-                hover_data=['Province'],
-                mapbox_style="carto-positron",
-                zoom=2,
-                center={"lat": 56.130, "lon": -106.347},
-                opacity=0.5,
-            )
-            fig.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0})
-            return fig
+            if all_provinces:
+                fig = px.choropleth_mapbox(
+                    pd.DataFrame({'Province': all_provinces}),
+                    geojson=geojson_data,
+                    locations='Province',
+                    featureidkey="properties.shapeName",
+                    color_discrete_sequence=["lightgray"],
+                    hover_data=['Province'],
+                    mapbox_style="carto-positron",
+                    zoom=2,
+                    center={"lat": 56.130, "lon": -106.347},
+                    opacity=0.5,
+                )
+                fig.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0})
+                return fig
+            else:
+                return {'data': [], 'layout': {'title': 'No province data available', 'margin': {"r": 0, "t": 0, "l": 0, "b": 0}}}
 
         filtered_features = [
             feat for feat in geojson_data['features']
@@ -151,10 +154,6 @@ def update_province_map(selected_provinces, all_provinces):
                 opacity=0.7,
             )
             fig.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0})
-
-            # **Crucially, we are NOT loading and processing the large POI file here.**
-            # We would need a different strategy to display POIs within memory limits.
-
             return fig
         else:
             return {'data': [], 'layout': {'title': 'No provinces selected'}}
@@ -164,13 +163,26 @@ def update_province_map(selected_provinces, all_provinces):
         return {'data': [], 'layout': {'title': 'Error displaying map'}}
 
 # ---------------------------
-# Placeholder for Potential POI Interaction (Needs a Memory-Efficient Strategy)
+# Callback: Update Clicked Markers List (Currently Not Functional with Large POI)
 # ---------------------------
-# You would need a different way to handle the large POI file.
-# Some possibilities (each with its own complexity):
-# 1. Pre-process POIs: Filter and save smaller, province-specific POI files. Load these on demand.
-# 2. Use a geospatial database: Query POIs within the selected province boundaries.
-# 3. Implement client-side filtering (if the browser has enough memory, which is unlikely for 280MB).
+@app.callback(
+    Output('clicked-markers', 'data'),
+    Input('choropleth-map', 'clickData'),
+    State('clicked-markers', 'data')
+)
+def update_clicked_markers(clickData, current_clicked):
+    if clickData and 'points' in clickData:
+        point = clickData['points'][0]
+        # The 'customdata' for markers is not being generated in the current
+        # memory-efficient approach for POIs.
+        # To implement marker clicking, you would need to load and process
+        # POI data (using one of the strategies discussed earlier) and
+        # generate the marker traces with 'customdata'.
+        if 'customdata' in point:
+            marker_id = point['customdata']
+            if marker_id not in current_clicked:
+                return current_clicked + [marker_id]
+    return current_clicked
 
 if __name__ == '__main__':
     app.run_server(debug=False)
