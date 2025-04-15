@@ -223,17 +223,18 @@ def update_province_map(selected_provinces, all_provinces, clicked_markers):
             markers = []
             for province in selected_provinces:
                 for poi in hardcoded_poi_coordinates.get(province, []):
+                    color = 'green' if f"{province}_{poi['place']}" in clicked_markers else 'red'
                     marker = go.Scattermapbox(
                         lat=[poi['lat']],
                         lon=[poi['lon']],
                         mode='markers',
                         marker=go.scattermapbox.Marker(
                             size=10,
-                            color='red'
+                            color=color
                         ),
                         text=poi['place'],
                         hoverinfo='text',
-                        customdata=[poi['marker_id']],  # Store a unique ID for clicked detection
+                        customdata=[f"{province}_{poi['place']}"],  # Store a unique ID for clicked detection
                     )
                     markers.append(marker)
 
@@ -276,4 +277,7 @@ def update_clicked_markers(clickData, current_clicked):
             marker_id = point['customdata'][0]  # Get the marker_id from customdata
             if marker_id not in current_clicked:
                 return current_clicked + [marker_id]
+            else:
+                # Remove the marker_id if it's already in the list (toggle behavior)
+                return [marker_id for marker_id in current_clicked if marker_id != marker_id]
     return current_clicked
