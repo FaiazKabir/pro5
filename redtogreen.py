@@ -5,12 +5,6 @@
 
 
 #!/usr/bin/env python
-# coding: utf-8
-
-# In[ ]:
-
-
-#!/usr/bin/env python
 import dash
 from dash import dcc, html, Input, Output, State
 import plotly.express as px
@@ -20,16 +14,14 @@ import json
 import zipfile
 
 # ---------------------------
-# Memory Optimizations:
-# 1. Load only necessary provinces
-# 2. Use simpler data structures
-# 3. Avoid geopandas (use raw GeoJSON)
-# 4. Simplify geometries upfront
-# ---------------------------
-
 # Hardcoded coordinates (unchanged)
+# ---------------------------
 hardcoded_poi_coordinates = {
-    # ... (keep your existing coordinate dictionary) ...
+    "Alberta": [
+        {"place": "Banff NP", "lat": 51.4968, "lon": -115.9281, "marker_id": "Alberta_Banff NP"},
+        # ... (keep all your existing POI coordinates) ...
+    ],
+    # ... (keep all your other provinces) ...
 }
 
 # Initialize Dash App
@@ -50,7 +42,7 @@ app.layout = html.Div([
 ])
 
 # ---------------------------
-# Load province names (memory efficient)
+# Load province names
 # ---------------------------
 @app.callback(
     [Output('province-dropdown', 'options'),
@@ -69,7 +61,7 @@ def load_province_names(_):
         return [], []
 
 # ---------------------------
-# Optimized map update
+# Optimized map update with POIs
 # ---------------------------
 @app.callback(
     Output('choropleth-map', 'figure'),
@@ -79,59 +71,70 @@ def load_province_names(_):
 )
 def update_map(selected_provinces, clicked_markers, all_provinces):
     try:
-        # Base map with all provinces (light gray)
-        if not selected_provinces:
-            return px.choropleth_mapbox(
-                pd.DataFrame({'Province': all_provinces}),
-                geojson=get_geojson(),
-                locations='Province',
-                featureidkey="properties.shapeName",
-                color_discrete_sequence=["lightgray"],
-                mapbox_style="carto-positron",
-                zoom=2,
-                center={"lat": 56.130, "lon": -106.347},
-                opacity=0.5
-            ).update_layout(margin={"r":0, "t":0, "l":0, "b":0})
-
-        # Load only selected provinces
+        # Base empty figure
+        fig = go.Figure()
+        
+        # Load GeoJSON data
         with zipfile.ZipFile('data.zip') as z:
             with z.open('geoBoundaries-CAN-ADM1_simplified.geojson') as f:
                 geojson = json.load(f)
-                filtered_features = [
-                    feat for feat in geojson['features']
-                    if feat['properties']['shapeName'] in selected_provinces
-                ]
-
-        fig = px.choropleth_mapbox(
-            pd.DataFrame({'Province': selected_provinces}),
-            geojson={"type": "FeatureCollection", "features": filtered_features},
-            locations='Province',
-            featureidkey="properties.shapeName",
-            color_discrete_sequence=["blue"],
+                
+                # Show all provinces in light gray if none selected
+                if not selected_provinces:
+                    fig.add_trace(go.Choroplethmapbox(
+                        geojson=geojson,
+                        locations=[f['properties']['shapeName'] for f in geojson['features']],
+                        z=[1]*len(geojson['features']),
+                        colorscale=[[0, 'lightgray'], [1, 'lightgray']],
+                        marker_opacity=0.5,
+                        featureidkey="properties.shapeName",
+                        showscale=False
+                    ))
+                else:
+                    # Show selected provinces in blue
+                    filtered_features = [
+                        feat for feat in geojson['features']
+                        if feat['properties']['shapeName'] in selected_provinces
+                    ]
+                    fig.add_trace(go.Choroplethmapbox(
+                        geojson={"type": "FeatureCollection", "features": filtered_features},
+                        locations=[f['properties']['shapeName'] for f in filtered_features],
+                        z=[1]*len(filtered_features),
+                        colorscale=[[0, 'blue'], [1, 'blue']],
+                        marker_opacity=0.7,
+                        featureidkey="properties.shapeName",
+                        showscale=False
+                    ))
+        
+        # Add POI markers for selected provinces
+        if selected_provinces:
+            for province in selected_provinces:
+                if province in hardcoded_poi_coordinates:
+                    for poi in hardcoded_poi_coordinates[province]:
+                        fig.add_trace(go.Scattermapbox(
+                            lat=[poi['lat']],
+                            lon=[poi['lon']],
+                            mode='markers',
+                            marker=dict(
+                                size=10,
+                                color='green' if poi['marker_id'] in clicked_markers else 'red'
+                            ),
+                            text=poi['place'],
+                            customdata=[poi['marker_id']],
+                            hoverinfo='text',
+                            showlegend=False
+                        ))
+        
+        # Update map layout
+        fig.update_layout(
             mapbox_style="carto-positron",
-            zoom=2,
-            center={"lat": 56.130, "lon": -106.347},
-            opacity=0.7
+            mapbox_zoom=2,
+            mapbox_center={"lat": 56.130, "lon": -106.347},
+            margin={"r":0, "t":0, "l":0, "b":0}
         )
-
-        # Add markers efficiently
-        for province in selected_provinces:
-            for poi in hardcoded_poi_coordinates.get(province, []):
-                fig.add_trace(go.Scattermapbox(
-                    lat=[poi['lat']],
-                    lon=[poi['lon']],
-                    mode='markers',
-                    marker=dict(
-                        size=10,
-                        color='green' if poi['marker_id'] in clicked_markers else 'red'
-                    ),
-                    text=poi['place'],
-                    customdata=[poi['marker_id']],
-                    hoverinfo='text'
-                ))
-
-        return fig.update_layout(margin={"r":0, "t":0, "l":0, "b":0})
-
+        
+        return fig
+        
     except Exception as e:
         print(f"Map error: {e}")
         return go.Figure().update_layout(
