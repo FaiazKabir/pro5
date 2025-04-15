@@ -4,19 +4,6 @@
 # In[ ]:
 
 
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[ ]:
-
-
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[ ]:
-
-
-#!/usr/bin/env python
 import dash
 from dash import dcc, html, Input, Output, State
 import plotly.express as px
